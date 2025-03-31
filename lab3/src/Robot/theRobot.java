@@ -265,6 +265,7 @@ public class theRobot extends JFrame {
     boolean isManual = false; // determines whether you (manual) or the AI (automatic) controls the robots movements
     boolean knownPosition = false;
     int startX = -1, startY = -1;
+    int currentX = -1, currentY = -1;
     int decisionDelay = 250;
     
     // store your probability map (for position of the robot in this array
@@ -272,6 +273,9 @@ public class theRobot extends JFrame {
     
     // store your computed value of being in each state (x, y)
     double[][] Vs;
+
+    // store your policy (i.e., the action you should take in each state)
+    int[][] policy;
     
     public theRobot(String _manual, int _decisionDelay) {
         // initialize variables as specified from the command-line
@@ -331,6 +335,8 @@ public class theRobot extends JFrame {
                 knownPosition = true;
                 startX = Integer.parseInt(sin.readLine());
                 startY = Integer.parseInt(sin.readLine());
+                currentX = startX;
+                currentY = startY;
                 System.out.println("Robot's initial position is known: " + startX + ", " + startY);
             }
             else {
@@ -585,12 +591,174 @@ public class theRobot extends JFrame {
         return totalProb;
     }
 
+    void computeValueIteration() {
+        double[][] newVs = new double[mundo.width][mundo.height];
+        double[][] rewards = new double[mundo.width][mundo.height];
+        double discount = 0.99;
+        double epsilon = 0.00001;       // 0.01
+        boolean converged = false;
+
+        for (int y = 0; y < mundo.height; y++) {
+            for (int x = 0; x < mundo.width; x++) {
+                if (mundo.grid[x][y] == 1) {
+                    rewards[x][y] = -100;
+                } else if (mundo.grid[x][y] == 2) {
+                    rewards[x][y] = -100;           // -10
+                } else if (mundo.grid[x][y] == 3) {
+                    rewards[x][y] = 200;            // 100
+                } else {
+                    rewards[x][y] = -1;
+                }
+            }
+        }
+
+        while (!converged) {
+            converged = true;
+
+            for (int y = 0; y < mundo.height; y++) {
+                for (int x = 0; x < mundo.width; x++) {
+                    if (mundo.grid[x][y] == 1) {
+                        newVs[x][y] = -100;
+                        continue;
+                    } else if (mundo.grid[x][y] == 2) {
+                        newVs[x][y] = -10;
+                        continue;
+                    } else if (mundo.grid[x][y] == 3) {
+                        newVs[x][y] = 100;
+                        continue;
+                    }
+
+                    double bestValue = Double.NEGATIVE_INFINITY;
+
+                    for (int action = 0; action < 5; action++) {
+                        double expectedUtility = 0.0;
+
+                        for (int dx = -1; dx <= 1; dx++) {
+                            for (int dy = -1; dy <= 1; dy++) {
+                                if (Math.abs(dx) + Math.abs(dy) == 2) continue;
+                                int newX = x + dx, newY = y + dy;
+                                if (newX < 0 || newX >= mundo.width || newY < 0 || newY >= mundo.height) continue;
+
+                                double transitionProb = getTransitionProbability(x, y, newX, newY, action);
+                                expectedUtility += transitionProb * Vs[newX][newY];
+                            }
+                        }
+
+                        double newValue = rewards[x][y] + discount * expectedUtility;
+                        if (newValue > bestValue) {
+                            bestValue = newValue;
+                        }
+                    }
+
+                    if (Math.abs(bestValue - Vs[x][y]) > epsilon) {
+                        converged = false;
+                    }
+
+                    newVs[x][y] = bestValue;
+                }
+            }
+
+            for (int x = 0; x < mundo.width; x++) {
+                for (int y = 0; y < mundo.height; y++) {
+                    Vs[x][y] = newVs[x][y];
+                }
+            }
+        }
+    }
+
+    void computePolicy(boolean debug_mode) {
+        policy = new int[mundo.width][mundo.height];
+
+        for (int y = 0; y < mundo.height; y++) {
+            for (int x = 0; x < mundo.width; x++) {
+                if (mundo.grid[x][y] == 1) {
+                    policy[x][y] = -1;
+                    continue;
+                } else if (mundo.grid[x][y] == 2) {
+                    policy[x][y] = -1;
+                    continue;
+                } else if (mundo.grid[x][y] == 3) {
+                    policy[x][y] = -1;
+                    continue;
+                }
+
+                double bestValue = Double.NEGATIVE_INFINITY;
+                int bestAction = -1;
+
+                for (int action = 0; action < 5; action++) {
+                    double expectedUtility = 0;
+
+                    for (int dx = -1; dx <= 1; dx++) {
+                        for (int dy = -1; dy <= 1; dy++) {
+                            if (Math.abs(dx) + Math.abs(dy) == 2) continue;
+                            int newX = x + dx, newY = y + dy;
+                            if (newX < 0 || newX >= mundo.width || newY < 0 || newY >= mundo.height) continue;
+                            if (mundo.grid[newX][newY] == 1) continue;
+
+                            double transitionProb = getTransitionProbability(x, y, newX, newY, action);
+                            expectedUtility += transitionProb * Vs[newX][newY];
+                        }
+                    }
+
+                    if (expectedUtility > bestValue && expectedUtility != 0.0) {
+                        bestValue = expectedUtility;
+                        bestAction = action;
+                    }
+                }
+
+                policy[x][y] = bestAction;
+            }
+        }
+
+        if (debug_mode) {
+            for (int y = 0; y < mundo.height; y++) {
+                for (int x = 0; x < mundo.width; x++) {
+                    if (mundo.grid[x][y] == 1) {
+                        System.out.print("X ");
+                    } else if (mundo.grid[x][y] == 2) {
+                        System.out.print("X ");
+                    } else if (mundo.grid[x][y] == 3) {
+                        System.out.print("G ");
+                    } else {
+                        if (policy[x][y] == NORTH) {
+                            System.out.print("N ");
+                        } else if (policy[x][y] == SOUTH) {
+                            System.out.print("S ");
+                        } else if (policy[x][y] == EAST) {
+                            System.out.print("E ");
+                        } else if (policy[x][y] == WEST) {
+                            System.out.print("W ");
+                        } else if (policy[x][y] == STAY) {
+                            System.out.print("STAY ");
+                        }
+                    }
+                }
+
+                System.out.print("\t");
+
+                for (int x = 0; x < mundo.width; x++) {
+                    System.out.printf("%4d ", Math.round(Vs[x][y]));
+                }
+                System.out.println();
+            }
+        }
+    }
 
     // This is the function you'd need to write to make the robot move using your AI;
     // You do NOT need to write this function for this lab; it can remain as is
     int automaticAction() {
-        
-        return STAY;  // default action for now
+        double max_probability = -1.0;
+        for (int x = 0; x < mundo.width; x++) {
+            for (int y = 0; y < mundo.height; y++) {
+                if (probs[x][y] > max_probability) {
+                    max_probability = probs[x][y];
+                    currentX = x;
+                    currentY = y;
+                }
+            }
+        }
+
+        return policy[currentX][currentY];
     }
     
     void doStuff() {
@@ -598,6 +766,8 @@ public class theRobot extends JFrame {
         
         //valueIteration();  // TODO: function you will write in Part II of the lab
         initializeProbabilities();  // Initializes the location (probability) map
+        computeValueIteration();
+        computePolicy(true);
         
         while (true) {
             try {
